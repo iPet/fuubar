@@ -3,11 +3,13 @@ require 'rspec/core'
 require 'rspec/core/formatters/base_text_formatter'
 require 'ruby-progressbar'
 require 'fuubar/output'
+require 'redis'
 
 RSpec.configuration.add_setting :fuubar_progress_bar_options, :default => {}
 
 class Fuubar < RSpec::Core::Formatters::BaseTextFormatter
   DEFAULT_PROGRESS_BAR_OPTIONS = { :format => ' %c/%C |%w>%i| %e ' }.freeze
+  REDIS = ::Redis.new
 
   RSpec::Core::Formatters.register self,  :start,
                                    :message,
@@ -16,10 +18,7 @@ class Fuubar < RSpec::Core::Formatters::BaseTextFormatter
                                    :example_failed,
                                    :dump_failures
 
-  attr_accessor :progress,
-                :passed_count,
-                :pending_count,
-                :failed_count
+  attr_accessor :progress
 
   def initialize(*args)
     super
@@ -42,9 +41,9 @@ class Fuubar < RSpec::Core::Formatters::BaseTextFormatter
                                  :autostart => false)
 
     self.progress      = ProgressBar.create(progress_bar_options)
-    self.passed_count  = 0
-    self.pending_count = 0
-    self.failed_count  = 0
+    REDIS.set("passed_coun", 0)
+    REDIS.set("pending_count", 0)
+    REDIS.set("failed_count", 0)
 
     super
 
@@ -52,23 +51,23 @@ class Fuubar < RSpec::Core::Formatters::BaseTextFormatter
   end
 
   def example_passed(_notification)
-    self.passed_count += 1
+    REDIS.incr("passed_count")
 
     increment
   end
 
   def example_pending(_notification)
-    self.pending_count += 1
+    REDIS.incr("pending_count")
 
     increment
   end
 
   def example_failed(notification)
-    self.failed_count += 1
+    REDIS.incr("failed_count")
 
     progress.clear
 
-    output.puts notification.fully_formatted(failed_count)
+    output.puts notification.fully_formatted(REDIS.get("failed_count"))
     output.puts
 
     increment
@@ -110,9 +109,9 @@ class Fuubar < RSpec::Core::Formatters::BaseTextFormatter
   end
 
   def current_color
-    if failed_count > 0
+    if REDIS.get("failed_count").to_i > 0
       configuration.failure_color
-    elsif pending_count > 0
+    elsif REDIS.get("pending_count").to_i > 0
       configuration.pending_color
     else
       configuration.success_color
